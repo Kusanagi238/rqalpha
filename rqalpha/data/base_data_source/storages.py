@@ -20,32 +20,35 @@ import json
 import locale
 import os
 import sys
+from contextlib import contextmanager
 from copy import copy
 from itertools import chain
-from contextlib import contextmanager
-from typing import Dict, Iterable, Optional, NamedTuple
+from typing import NamedTuple
 
 import h5py
 import numpy as np
 import pandas
 from methodtools import lru_cache
 
-from rqalpha.const import COMMISSION_TYPE, INSTRUMENT_TYPE
-from rqalpha.model.instrument import Instrument
+from rqalpha.const import COMMISSION_TYPE
 from rqalpha.utils.datetime_func import convert_date_to_date_int
 from rqalpha.utils.i18n import gettext as _
-from rqalpha.utils.logger import user_system_log
 
-from .storage_interface import (AbstractCalendarStore, AbstractDateSet,
-                                AbstractDayBarStore, AbstractDividendStore,
-                                AbstractInstrumentStore,
-                                AbstractSimpleFactorStore)
+from .storage_interface import (
+    AbstractCalendarStore,
+    AbstractDateSet,
+    AbstractDayBarStore,
+    AbstractDividendStore,
+    AbstractInstrumentStore,
+    AbstractSimpleFactorStore,
+)
 
 
 class FuturesTradingParameters(NamedTuple):
     """
     数据类，用以存储期货交易参数数据
     """
+
     close_commission_ratio: float
     close_commission_today_ratio: float
     commission_type: str
@@ -60,25 +63,31 @@ class ExchangeTradingCalendarStore(AbstractCalendarStore):
 
     def get_trading_calendar(self):
         # type: () -> pandas.DatetimeIndex
-        return pandas.to_datetime([str(d) for d in np.load(self._f, allow_pickle=False)])
+        return pandas.to_datetime(
+            [str(d) for d in np.load(self._f, allow_pickle=False)]
+        )
 
 
 class FutureInfoStore(object):
     COMMISSION_TYPE_MAP = {
         "by_volume": COMMISSION_TYPE.BY_VOLUME,
-        "by_money": COMMISSION_TYPE.BY_MONEY
+        "by_money": COMMISSION_TYPE.BY_MONEY,
     }
 
     def __init__(self, f, custom_future_info):
         with open(f, "r") as json_file:
             self._default_data = {
-                item.get("order_book_id") or item.get("underlying_symbol"): self._process_future_info_item(
-                    item
-                ) for item in json.load(json_file)
+                item.get("order_book_id")
+                or item.get("underlying_symbol"): self._process_future_info_item(item)
+                for item in json.load(json_file)
             }
         self._custom_data = custom_future_info
         if "margin_rate" not in self._default_data[next(iter(self._default_data))]:
-            raise RuntimeError(_("The bundle data you are using is too old, please update it to lastest before using"))
+            raise RuntimeError(
+                _(
+                    "The bundle data you are using is too old, please update it to lastest before using"
+                )
+            )
 
     @classmethod
     def _process_future_info_item(cls, item):
@@ -88,41 +97,55 @@ class FutureInfoStore(object):
     @lru_cache(1024)
     def get_future_info(self, order_book_id, underlying_symbol):
         # type: (str, str) -> FuturesTradingParameters
-        custom_info = self._custom_data.get(order_book_id) or self._custom_data.get(underlying_symbol)
-        info = self._default_data.get(order_book_id) or self._default_data.get(underlying_symbol)
+        custom_info = self._custom_data.get(order_book_id) or self._custom_data.get(
+            underlying_symbol
+        )
+        info = self._default_data.get(order_book_id) or self._default_data.get(
+            underlying_symbol
+        )
         if custom_info:
             info = copy(info) or {}
             info.update(custom_info)
         elif not info:
-            raise NotImplementedError(_("unsupported future instrument {}").format(order_book_id))
+            raise NotImplementedError(
+                _("unsupported future instrument {}").format(order_book_id)
+            )
         info = self._to_namedtuple(info)
         return info
-    
+
     def _to_namedtuple(self, info):
         # type: (dict) -> FuturesTradingParameters
         futures_info = copy(info)
-        futures_info['long_margin_ratio'], futures_info['short_margin_ratio'] = futures_info['margin_rate'], futures_info['margin_rate']
-        del futures_info['margin_rate'], futures_info['tick_size']
+        futures_info["long_margin_ratio"], futures_info["short_margin_ratio"] = (
+            futures_info["margin_rate"],
+            futures_info["margin_rate"],
+        )
+        del futures_info["margin_rate"], futures_info["tick_size"]
         try:
-            del futures_info['order_book_id']
+            del futures_info["order_book_id"]
         except KeyError:
-            del futures_info['underlying_symbol']
+            del futures_info["underlying_symbol"]
         futures_info = FuturesTradingParameters(**futures_info)
         return futures_info
-    
-    @lru_cache(8)
+
     def get_tick_size(self, instrument):
         # type: (str, str) -> float
         order_book_id = instrument.order_book_id
         underlying_symbol = instrument.underlying_symbol
-        custom_info = self._custom_data.get(order_book_id) or self._custom_data.get(underlying_symbol)
-        info = self._default_data.get(order_book_id) or self._default_data.get(underlying_symbol)
+        custom_info = self._custom_data.get(order_book_id) or self._custom_data.get(
+            underlying_symbol
+        )
+        info = self._default_data.get(order_book_id) or self._default_data.get(
+            underlying_symbol
+        )
         if custom_info:
             info = copy(info) or {}
             info.update(custom_info)
         elif not info:
-            raise NotImplementedError(_("unsupported future instrument {}".format(order_book_id)))
-        tick_size = info['tick_size']
+            raise NotImplementedError(
+                _("unsupported future instrument {}".format(order_book_id))
+            )
+        tick_size = info["tick_size"]
         return tick_size
 
 
@@ -135,7 +158,7 @@ class InstrumentStore(AbstractInstrumentStore):
 
         for ins in instruments:
             if ins.type != instrument_type:
-                    continue
+                continue
             self._instruments[ins.order_book_id] = ins
             self._sym_id_map[ins.symbol] = ins.order_book_id
 
@@ -164,7 +187,7 @@ class InstrumentStore(AbstractInstrumentStore):
 
 class ShareTransformationStore(object):
     def __init__(self, f):
-        with codecs.open(f, 'r', encoding="utf-8") as store:
+        with codecs.open(f, "r", encoding="utf-8") as store:
             self._share_transformation = json.load(store)
 
     def get_share_transformation(self, order_book_id):
@@ -172,7 +195,9 @@ class ShareTransformationStore(object):
             transformation_data = self._share_transformation[order_book_id]
         except KeyError:
             return
-        return transformation_data["successor"], transformation_data["share_conversion_ratio"]
+        return transformation_data["successor"], transformation_data[
+            "share_conversion_ratio"
+        ]
 
 
 def _file_path(path):
@@ -192,9 +217,11 @@ def open_h5(path, *args, **kwargs):
     try:
         return h5py.File(_file_path(path), *args, **kwargs)
     except OSError as e:
-        raise RuntimeError(_(
-            "open data bundle failed, you can remove {} and try to regenerate bundle: {}"
-        ).format(path, e))
+        raise RuntimeError(
+            _(
+                "open data bundle failed, you can remove {} and try to regenerate bundle: {}"
+            ).format(path, e)
+        )
 
 
 @contextmanager
@@ -202,9 +229,11 @@ def h5_file(path, *args, mode="r", **kwargs):
     try:
         h5 = h5py.File(_file_path(path), *args, mode=mode, **kwargs)
     except OSError as e:
-        raise RuntimeError(_(
-            "open data bundle failed, you can remove {} and try to regenerate bundle: {}"
-        ).format(path, e))
+        raise RuntimeError(
+            _(
+                "open data bundle failed, you can remove {} and try to regenerate bundle: {}"
+            ).format(path, e)
+        )
     else:
         try:
             yield h5
@@ -213,18 +242,22 @@ def h5_file(path, *args, mode="r", **kwargs):
 
 
 class DayBarStore(AbstractDayBarStore):
-    DEFAULT_DTYPE = np.dtype([
-        ('datetime', np.uint64),
-        ('open', np.float64),
-        ('close', np.float64),
-        ('high', np.float64),
-        ('low', np.float64),
-        ('volume', np.float64),
-    ])
+    DEFAULT_DTYPE = np.dtype(
+        [
+            ("datetime", np.uint64),
+            ("open", np.float64),
+            ("close", np.float64),
+            ("high", np.float64),
+            ("low", np.float64),
+            ("volume", np.float64),
+        ]
+    )
 
     def __init__(self, path):
         if not os.path.exists(path):
-            raise FileExistsError("File {} not exist，please update bundle.".format(path))
+            raise FileExistsError(
+                "File {} not exist，please update bundle.".format(path)
+            )
         self._path = path
 
     def get_bars(self, order_book_id):
@@ -238,13 +271,15 @@ class DayBarStore(AbstractDayBarStore):
         with h5_file(self._path) as h5:
             try:
                 data = h5[order_book_id]
-                return data[0]['datetime'], data[-1]['datetime']
+                return data[0]["datetime"], data[-1]["datetime"]
             except KeyError:
                 return 20050104, 20050104
 
 
 class FutureDayBarStore(DayBarStore):
-    DEFAULT_DTYPE = np.dtype(DayBarStore.DEFAULT_DTYPE.descr + [("open_interest", '<f8')])
+    DEFAULT_DTYPE = np.dtype(
+        DayBarStore.DEFAULT_DTYPE.descr + [("open_interest", "<f8")]
+    )
 
 
 class DividendStore(AbstractDividendStore):
@@ -268,20 +303,20 @@ class YieldCurveStore:
         d1 = convert_date_to_date_int(start_date)
         d2 = convert_date_to_date_int(end_date)
 
-        s = self._data['date'].searchsorted(d1)
-        e = self._data['date'].searchsorted(d2, side='right')
+        s = self._data["date"].searchsorted(d1)
+        e = self._data["date"].searchsorted(d2, side="right")
 
         if e == len(self._data):
             e -= 1
-        if self._data[e]['date'] == d2:
+        if self._data[e]["date"] == d2:
             e += 1
 
         if e < s:
             return None
 
         df = pandas.DataFrame(self._data[s:e])
-        df.index = pandas.to_datetime([str(d) for d in df['date']])
-        del df['date']
+        df.index = pandas.to_datetime([str(d) for d in df["date"]])
+        del df["date"]
 
         if tenor is not None:
             return df[tenor]

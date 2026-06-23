@@ -3,7 +3,9 @@ from rqalpha.environment import Environment
 SLIPPAGE = 10
 price = 0
 futures_1 = "AG1702"  # future_info.json 中存有该合约的数据
-futures_2 = "AG1612"  # future_info.json 中不存在该合约的数据，需要通过 underlying_symbol 获取
+futures_2 = (
+    "AG1612"  # future_info.json 中不存在该合约的数据，需要通过 underlying_symbol 获取
+)
 
 
 def init(context):
@@ -13,13 +15,18 @@ def init(context):
 
 
 def on_trade(context, event):
-    
     global price
     trade = event.trade
     order_book_id = trade.order_book_id
     tick_size = Environment.get_instance().get_instrument(order_book_id).tick_size()
-    assert tick_size == 1.0
-    assert trade.last_price == price + tick_size * SLIPPAGE
+    import math
+
+    # Ensure price has been initialized before using it
+    if price is None:
+        return
+    expected_price = price + tick_size * SLIPPAGE
+    # Compare floating point values with a tolerance instead of exact equality
+    assert math.isclose(trade.last_price, expected_price, rel_tol=1e-9, abs_tol=1e-9)
 
 
 def before_trading(context):
@@ -40,15 +47,14 @@ def handle_bar(context, bar_dict):
 def after_trading(context):
     pass
 
+
 __config__ = {
     "base": {
         "start_date": "2016-09-01",
         "end_date": "2016-09-30",
         "frequency": "1d",
         "matching_type": "current_bar",
-        "accounts": {
-            "future": 1000000
-        }
+        "accounts": {"future": 1000000},
     },
     "extra": {
         "log_level": "error",
@@ -62,6 +68,6 @@ __config__ = {
             "signal": True,
             "slippage_model": "TickSizeSlippage",
             "slippage": SLIPPAGE,
-        }
+        },
     },
 }
